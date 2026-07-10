@@ -162,108 +162,20 @@
 
 <script>
 (function () {
-  const SUBREDDIT = "Subaru";
-  const CACHE_KEY = "subaru-of-the-day";
+  const DATA_URL = "data/today.json";
   const app = document.getElementById("app");
 
-  function todayKey() {
-    const d = new Date();
-    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
-  }
-
-  function readCache() {
-    try {
-      const raw = localStorage.getItem(CACHE_KEY);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      if (parsed.day !== todayKey()) return null;
-      return parsed;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function writeCache(post) {
-    try {
-      localStorage.setItem(CACHE_KEY, JSON.stringify({ day: todayKey(), post, fetchedAt: Date.now() }));
-    } catch (e) {
-      /* localStorage unavailable, ignore */
-    }
-  }
-
-  function decodeHtml(str) {
-    const el = document.createElement("textarea");
-    el.innerHTML = str;
-    return el.value;
-  }
-
-  function isDirectImageUrl(url) {
-    return /\.(jpe?g|png|gif|webp)(\?.*)?$/i.test(url);
-  }
-
-  function extractImageUrl(post) {
-    if (post.is_video) return null;
-
-    if (post.post_hint === "image" && post.url) {
-      return post.url;
-    }
-
-    if (isDirectImageUrl(post.url || "")) {
-      return post.url;
-    }
-
-    if (post.is_gallery && post.media_metadata) {
-      const firstItemId = (post.gallery_data && post.gallery_data.items && post.gallery_data.items[0])
-        ? post.gallery_data.items[0].media_id
-        : Object.keys(post.media_metadata)[0];
-      const meta = post.media_metadata[firstItemId];
-      if (meta && meta.s && meta.s.u) {
-        return decodeHtml(meta.s.u);
-      }
-    }
-
-    if (post.preview && post.preview.images && post.preview.images[0]) {
-      const src = post.preview.images[0].source;
-      if (src && src.url) return decodeHtml(src.url);
-    }
-
-    return null;
-  }
-
-  function findTopImagePost(children) {
-    for (const child of children) {
-      const post = child.data;
-      if (!post || post.stickied || post.over_18) continue;
-      const imageUrl = extractImageUrl(post);
-      if (imageUrl) {
-        return {
-          title: post.title,
-          author: post.author,
-          score: post.score,
-          numComments: post.num_comments,
-          permalink: "https://www.reddit.com" + post.permalink,
-          imageUrl,
-          createdUtc: post.created_utc
-        };
-      }
-    }
-    return null;
-  }
-
   async function fetchTopPost() {
-    const url = `https://www.reddit.com/r/${SUBREDDIT}/top/.json?t=day&limit=50`;
-    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    const res = await fetch(`${DATA_URL}?_=${Date.now()}`, { headers: { Accept: "application/json" } });
+    if (res.status === 404) {
+      throw new Error("Today's pick hasn't been generated yet. Check back soon.");
+    }
     if (!res.ok) {
-      throw new Error(`Reddit API responded with ${res.status}`);
+      throw new Error(`Failed to load today's pick (${res.status})`);
     }
-    const json = await res.json();
-    const children = json && json.data && json.data.children;
-    if (!children || !children.length) {
-      throw new Error("No posts found for today");
-    }
-    const post = findTopImagePost(children);
-    if (!post) {
-      throw new Error("No image posts found in today's top posts");
+    const post = await res.json();
+    if (!post || !post.imageUrl) {
+      throw new Error("Today's data looks incomplete. Check back soon.");
     }
     return post;
   }
@@ -282,12 +194,13 @@
       <div>⚠️ ${message}</div>
       <button class="retry-btn" id="retryBtn">Try again</button>
     `;
-    document.getElementById("retryBtn").addEventListener("click", () => load(true));
+    document.getElementById("retryBtn").addEventListener("click", load);
   }
 
-  function renderPost(post, fromCache) {
-    app.className = "";
-    app.removeAttribute("style");
+  function renderPost(post) {
+    const updatedLabel = post.fetchedAt
+      ? "Updated " + new Date(post.fetchedAt).toLocaleString()
+      : "";
     const cardHtml = `
       <div class="card">
         <div class="image-wrap">
@@ -302,7 +215,7 @@
           </div>
           <div class="footer-row">
             <button class="refresh-btn" id="refreshBtn">Refresh</button>
-            <span class="updated">${fromCache ? "Cached for today" : "Updated just now"}</span>
+            <span class="updated">${escapeHtml(updatedLabel)}</span>
           </div>
         </div>
       </div>
@@ -312,7 +225,7 @@
     app.style.display = "flex";
     app.style.justifyContent = "center";
     app.innerHTML = cardHtml;
-    document.getElementById("refreshBtn").addEventListener("click", () => load(true));
+    document.getElementById("refreshBtn").addEventListener("click", load);
   }
 
   function escapeHtml(str) {
@@ -321,27 +234,18 @@
     return div.innerHTML;
   }
 
-  async function load(forceRefresh) {
-    if (!forceRefresh) {
-      const cached = readCache();
-      if (cached && cached.post) {
-        renderPost(cached.post, true);
-        return;
-      }
-    }
-
+  async function load() {
     renderLoading();
     try {
       const post = await fetchTopPost();
-      writeCache(post);
-      renderPost(post, false);
+      renderPost(post);
     } catch (err) {
       console.error(err);
-      renderError(err.message || "Something went wrong fetching today's Subaru.");
+      renderError(err.message || "Something went wrong loading today's Subaru.");
     }
   }
 
-  load(false);
+  load();
 })();
 </script>
 
