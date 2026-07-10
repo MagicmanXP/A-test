@@ -62,10 +62,45 @@ function findTopImagePost(children) {
   return null;
 }
 
+async function getAccessToken() {
+  const clientId = process.env.REDDIT_CLIENT_ID;
+  const clientSecret = process.env.REDDIT_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) {
+    throw new Error("REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET env vars are required");
+  }
+
+  const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+  const res = await fetch("https://www.reddit.com/api/v1/access_token", {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${basicAuth}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "User-Agent": USER_AGENT
+    },
+    body: "grant_type=client_credentials"
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to get Reddit access token: ${res.status} ${res.statusText}`);
+  }
+
+  const json = await res.json();
+  if (!json.access_token) {
+    throw new Error("Reddit OAuth response did not include an access_token");
+  }
+  return json.access_token;
+}
+
 async function main() {
-  const url = `https://www.reddit.com/r/${SUBREDDIT}/top/.json?t=day&limit=50`;
+  const accessToken = await getAccessToken();
+
+  const url = `https://oauth.reddit.com/r/${SUBREDDIT}/top?t=day&limit=50&raw_json=1`;
   const res = await fetch(url, {
-    headers: { "User-Agent": USER_AGENT, Accept: "application/json" }
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "User-Agent": USER_AGENT
+    }
   });
 
   if (!res.ok) {
